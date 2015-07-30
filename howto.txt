@@ -1,0 +1,62 @@
+
+Benodigdheden:
+- Soldeerbordje
+- Opentilt-bordje
+- 3,3 V Arduino Pro Mini
+- nRF24L01+
+- 7805 LDO
+- 2+ pins screw terminal
+- 4+ pins screw terminal
+- 3x IRF540 MOSFET
+- Header pins
+- 4 bit rotary DIP-switch
+- Draad:
+    - 0,75 mm2 solid (oranje)
+    - rood, groen, blauw, geel
+
+1. Soldeer headers aan arduino
+    - Lange zijden
+    - Programmeer-headers
+
+2. Monteer op opentiltbordje de headers voor:
+    - BTN GND GND R G B VCC
+    - xx 3V3 5V GND etc.
+
+3. Overbrug de 3 weerstand-footprints met een draadje
+
+4. Soldeer de arduino op het opentiltbordje
+
+5. Soldeer de nRF24L01+ op het opentiltbordje
+    - Knip eerst de uitstekende pinnen van het kristal af
+
+6. Soldeer het opentilt-bordje op het gaatjesbordje
+
+7. Soldeer de MOSFETs.
+    - Drain richting bijbehorende pin van screw terminal
+    - Source ombuigen en aan de bovenkant houden, dit komt aan GND
+
+8. Soldeer de screw terminal waar de stroom binnenkomt (+12V en GND)
+
+9. Strip de dikke koperdraad en leg de high power circuits:
+    - Hier gaat veel stroom doorheen, dus veel contactoppervlak, veel tin.
+    - GND van screw terminal naar de source-pinnen van de mosfets
+
+10. Soldeer de screw terminal voor de ledstrip (G-R-B-12V)
+
+9. (vervolg high power met dikke draad)
+    - +12V van de ene naar de andere screw terminal
+    - Per mosfet: tussen drain en pin van screw terminal
+
+11. Soldeer de 7805.
+    - GND weer aan de bovenkant. Verbind GND meteen met de arduino...
+    - +12V naar IN
+    - OUT naar RAW van de Arduino via geel draadje
+
+12. Verbind onderaan het opentiltbordje:
+    - VCC van de Arduino naar 3V3 van de headerpin
+    - Draadjes van R-G-B naar G-R-B (volgorde is anders!!) gates
+
+13. Soldeer de DIP-switch voor ID-selectie
+    - Pinnen 2, 3, 4 en 7.
+    - GND
+
