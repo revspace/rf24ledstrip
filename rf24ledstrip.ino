@@ -11,12 +11,17 @@
 // memo
 // echo 99669966004c454453... > /dev/ttyUSB0 
 
+/*
+perl -le'for(;;) { select undef, undef, undef, 1; $p = +("99669966004c45445300" . unpack("H*", join "", map { chr int rand 256 } 1..3)); for (1..10) { print $p; select undef, undef, undef, .01; } }'  > /dev/ttyUSB0
+*/
 
 const int flag_addr  =   1;  // Specify a recipient mask
 const int flag_wait  =   2;  // Specify a wait time
 const int flag_waitx =   4;  // Same, but multiplied by id
 const int flag_flash =   8;  // Specify pattern: on time, off time, iterations
 const int flag_fade  =  16;  // Specify a fade time
+const int flag_meh1  =  32;
+const int flag_meh2  =  64;
 const int flag_more  = 128;  // More flags!
 
 const int pin_led_r = 5;   // pwm
@@ -35,9 +40,21 @@ const float factor_r = 1;
 const float factor_g = .65;
 const float factor_b = .7;
 
+
+
 const int factor_time = 64;  // compensation for faster timer
 
+const uint32_t keepalive_interval = 20000 * factor_time;
+
 static long int address = 0x66996699L;
+
+static float fade_r;
+static float fade_g;
+static float fade_b;
+static Color fade_from;
+static Color fade_to;
+static uint32_t fade_begin;
+static uint32_t fade_end = 0;
 
 
 uint8_t cielab[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
@@ -88,6 +105,19 @@ void led(Color color) {
     analogWrite(pin_led_b, cielab[b]);
 }
 
+void setup_radio() {
+    rf.begin();
+
+    if (! rf.isPVariant()) {
+        Serial.println("No nRF24L01+. Halting.");
+        for (;;);
+    }
+    rf.enableDynamicPayloads();
+    rf.openReadingPipe(1, address);
+    rf.startListening();
+    D("setup_radio done; CRC=%d", rf.getCRCLength());
+}
+
 void setup () {
 
     bitSet(TCCR1B, WGM12);
@@ -113,22 +143,14 @@ void setup () {
     led(green); mydelay(100);
     led(blue);  mydelay(100);
     digitalWrite(13, LOW);
-    led(off);   mydelay(3e3);
+    led(off);
 
     read_id();
     Serial.begin(57600);
     debug_begin();
     D("Hello, my name is %d.", me);
 
-    rf.begin();
-
-    if (! rf.isPVariant()) {
-        Serial.println("No nRF24L01+. Halting.");
-        for (;;);
-    }
-    rf.enableDynamicPayloads();
-    rf.openReadingPipe(1, address);
-    rf.startListening();
+    setup_radio();
 
     D("Setup done.");
 }
@@ -199,9 +221,15 @@ void handle_param(char* buf, bool waited = false) {
     }
 
     if (flags & flag_fade) {
-        // not implemented yet
-        buf += 1;
+        uint8_t fade_time = *((uint8_t*) buf++);
+
+        fade_begin = millis();
+        fade_end = fade_begin + (uint32_t) 100 * fade_time * factor_time;
     }
+
+    if (flags & flag_meh1) return;
+    if (flags & flag_meh2) return;
+    if (flags & flag_more) return;
 
     char* buf_color = buf;
 
@@ -217,6 +245,25 @@ void handle_param(char* buf, bool waited = false) {
         }
     }
 
+    if (flags & flag_fade) {
+        fade_to = *((Color*) buf_color);
+        fade_from = c;
+        uint32_t fade_ticks = fade_end - fade_begin;
+        fade_r = (float) (fade_to.r - fade_from.r) / fade_ticks;
+        fade_g = (float) (fade_to.g - fade_from.g) / fade_ticks;
+        fade_b = (float) (fade_to.b - fade_from.b) / fade_ticks;;
+
+        Serial.println("FAAAAAAAADE!");
+        Serial.println(fade_ticks);
+        Serial.println(fade_r);
+        Serial.println(fade_g);
+        Serial.println(fade_b);
+        D("#%02x%02x%02x -> %02x%02x%02x", fade_from.r, fade_from.g, fade_from.b,
+                                         fade_to.r, fade_to.g, fade_to.b);
+
+        return;
+    }
+
     if (flags & flag_flash) {
         Color flash_color = *((Color*) buf_color);
         flash(flash_on, flash_off, flash_times, flash_color);
@@ -229,6 +276,8 @@ void handle_param(char* buf, bool waited = false) {
     led(c);
 }
 
+
+static uint32_t next_keepalive = keepalive_interval;
 
 void loop () {
     static char _buf[65];
@@ -243,12 +292,33 @@ void loop () {
         wait_until = 0;
     }
 
-    if (!rf.available())
+    if (!rf.available()) {
+        if (!fade_end) return;
+
+        // No new data. Let's fade!
+        uint32_t now = millis();
+        if (now >= fade_end) {
+            D("aeou");
+            led(c = fade_to);
+            fade_end = 0;
+        } else {
+            uint32_t delta = now - fade_begin;
+
+            c.r = fade_from.r + fade_r * delta;
+            c.g = fade_from.g + fade_g * delta;
+            c.b = fade_from.b + fade_b * delta;
+            led(c);
+        }
+
+
         return;
+    }
 
     rf.read(&_buf, sizeof _buf);
     Serial.println(buf);
     buf++;  // ignore length byte.
+
+    setup_radio();
 
     if (memcmp("DBEL", buf, 4) == 0) {
         flash(1000, 1000, 10, yellow);
@@ -261,45 +331,5 @@ void loop () {
 
     handle_param(buf_param);
 
-}
-
-
-////////////////////////////////////////
-// VANAF HIER COPY/PASTE :-)
-////////////////////////////////////////
-
-// Cycle through the color wheel, equally spaced around the belt
-void rainbowCycle(uint32_t wait) {
-    uint16_t i, j;
-    for (j=0; j < 384; j += 4) {     // 5 cycles of all 384 colors in the wheel
-        i = 0;
-
-        byte r, g, b;
-        uint16_t WheelPos = j;
-        switch(WheelPos / 128) {
-            case 0:
-                r = 127 - WheelPos % 128; // red down
-                g = WheelPos % 128;       // green up
-                b = 0;                    // blue off
-                break;
-            case 1:
-                g = 127 - WheelPos % 128; // green down
-                b = WheelPos % 128;       // blue up
-                r = 0;                    // red off
-                break;
-            case 2:
-                b = 127 - WheelPos % 128; // blue down
-                r = WheelPos % 128;       // red up
-                g = 0;                    // green off
-                break;
-        }
-        b *= 0.4;
-        g *= 0.5;
-
-        Color c = { r, g, b};
-
-        led(c);
-        mydelay(wait);
-    }
 }
 
